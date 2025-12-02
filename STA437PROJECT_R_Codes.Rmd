@@ -1,0 +1,752 @@
+---
+title: "STA437 Final Project R codes"
+author: "Jinting Liu, Haoyuan Chen"
+date: "2025-12-02"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    keep_tex: true
+always_allow_html: true
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,warning=FALSE}
+# package
+library(ggplot2)
+library(dplyr)
+library(viridis)
+library(ggfortify)
+library(plotly)
+library(paletteer)
+library(umap)
+library(psych)
+library(CCA)
+library(ggthemes)
+library(scatterplot3d)
+```
+
+```{r}
+# helper function (PCA)
+heatmap = function (A){
+  n = nrow(A)
+  p = ncol(A)
+  df = data.frame(
+    value = c(A),
+    i = rep(1:n, p),
+    j = rep(1:p, each=n)
+  )
+  ggplot(df, aes(j, i, fill = value)) +
+    geom_tile() +
+    scale_fill_paletteer_c("ggthemes::Sunset-Sunrise Diverging") +
+    scale_y_reverse() +
+    theme_void()
+}
+
+getdigit = function(gsvalues){
+  matrix(unlist(gsvalues), 28, 28, byrow = T)
+}
+
+small_getdigit = function(gsvalues){
+  matrix(unlist(gsvalues), 14, 28, byrow = T)
+}
+
+my_barplot = function(values){
+    n = length(values)
+    df = data.frame(value = values, index = 1:n)
+    ggplot(df, aes(index, value, fill = value)) +
+        geom_bar(color = "black", stat = "identity")+
+        scale_fill_paletteer_c("ggthemes::Blue Light")+
+        theme_bw()
+}
+```
+
+```{r}
+# helper function CCA
+CCA_heatmap = function(A, addnames = FALSE){
+    library(ggplot2)
+    n = nrow(A)
+    p = ncol(A)
+    rn = rownames(A)
+    cn = colnames(A)
+    if (is.null(rn)) rn = as.character(1:n)
+    if (is.null(cn)) cn = as.character(1:p)
+    df = data.frame(
+        value = c(A),
+        i = rep(1:n, times = p),
+        j = rep(1:p, each = n),
+        rowlab = factor(rep(rn, times = p), levels = rev(rn)),
+        collab = factor(rep(cn, each = n), levels = cn)
+    )
+    plt = ggplot(df, aes(x = collab, y = rowlab, fill = value)) +
+        geom_tile() +
+        scale_fill_paletteer_c("ggthemes::Sunset-Sunrise Diverging")
+
+    if (addnames) return(plt + 
+        theme_minimal() + 
+        theme(axis.title = element_blank(), axis.text.x = 
+                element_text(angle = 45, hjust = 1, vjust = 1), axis.text.y = element_text()))
+    else return(plt + 
+        theme_void() + 
+        theme(legend.position = "none"))
+}
+
+get_top2 <- function(x) order(x, decreasing = TRUE)[1:2]
+get_bottom2 <- function(x) order(x, decreasing = FALSE)[1:2]
+```
+
+```{r}
+pixel_df<- read.csv("mnist.csv", header = TRUE)
+```
+
+```{r,eval=FALSE}
+# glimpse dataset
+
+head(pixel_df, 10)
+```
+
+```{r}
+# data process: 
+colnames(pixel_df) = c("label", paste0("pixel", 1:784))
+pixel_df = pixel_df %>% mutate(label = factor(label))
+pixel_df %>% group_by(label) %>% 
+summarize(n = n())
+```
+
+```{r}
+digits = pixel_df[,-1]
+digits_matrix <- as.matrix(digits)
+```
+
+```{r}
+# check na
+sum(is.na(digits_matrix)) 
+```
+
+```{r}
+PCA = prcomp(digits_matrix, center = TRUE, scale = FALSE)
+autoplot(PCA, data = pixel_df, shape = F, color = "label", 
+         label = TRUE, label.label = "label", scale = 0)+
+  theme(legend.position = "none")
+
+```
+
+```{r}
+img_mean <- rowMeans(digits_matrix)
+img_var  <- apply(digits_matrix, 1, var)
+stats_df <- data.frame(
+  label = pixel_df$label,
+  mean = img_mean,
+  variance = img_var
+)
+
+library(dplyr)
+
+label_summary <- stats_df %>%
+  group_by(label) %>%
+  summarize(
+    number = n(),
+    mean_intensity = mean(mean),
+    variance = mean(variance), 
+  )
+
+label_summary
+```
+
+
+
+
+
+```{r}
+subset_df_8 <- pixel_df %>% 
+  filter(label %in% c(8))
+sub_digits_8 = subset_df_8[,-1]
+sub_digits_matrix_8 <- as.matrix(sub_digits_8)
+sub_digits_matrix_8_centered = scale(sub_digits_matrix_8, scale = FALSE, center = TRUE)
+sub_digits_matrix_8_cov = cov(sub_digits_matrix_8_centered)
+ED_8 = eigen(sub_digits_matrix_8_cov)
+eigen_value_8 = ED_8$values
+std_8 = sqrt(eigen_value_8)
+head(std_8)
+```
+
+
+
+```{r}
+sub_digits_8_matrix <- as.matrix(sub_digits_8)
+
+top_8  <- sub_digits_8_matrix[, 1:392]
+
+bottom_8 <- sub_digits_8_matrix[, 393:784]
+
+dim(top_8)   # 500 × 392
+dim(bottom_8)  # 500 × 392
+
+# check na
+sum(is.na(top_8)) 
+sum(is.na(bottom_8)) 
+```
+```{r}
+cov = cov(top_8,top_8)
+```
+
+```{r}
+top_mean  <- rowMeans(top_8)
+top_var   <- apply(top_8, 1, var)
+top_total <- rowSums(top_8)
+
+bottom_mean  <- rowMeans(bottom_8)
+bottom_var   <- apply(bottom_8, 1, var)
+bottom_total <- rowSums(bottom_8)
+
+# build summary table with two rows
+summary_half_two_rows <- data.frame(
+  part = c("top_half", "bottom_half"),
+  number = c(length(top_mean), length(bottom_mean)),
+  
+  mean_intensity = c(mean(top_mean), mean(bottom_mean)),
+  variance       = c(mean(top_var),  mean(bottom_var))
+)
+
+summary_half_two_rows
+```
+
+
+
+```{r}
+# centering data and do PCA
+PCA_L <- prcomp(top_8,  center = TRUE, scale. = FALSE)
+PCA_R <- prcomp(bottom_8, center = TRUE, scale. = FALSE)
+```
+
+```{r}
+summ_top = summary(PCA_L)
+summ_data_frame_top = data.frame(summ_top$importance)[, 1:10]
+summ_data_frame_top
+```
+
+```{r}
+summ_bottom = summary(PCA_R)
+summ_data_frame_bottom = data.frame(summ_bottom$importance)[, 1:10]
+summ_data_frame_bottom
+```
+
+
+
+```{r}
+variance_explained_PCA_sub_digits_8_top = summary(PCA_L)$importance[3,]
+k_optimal_8_top <- which(variance_explained_PCA_sub_digits_8_top >= 0.9)[1]
+
+my_barplot(variance_explained_PCA_sub_digits_8_top[1:100]) +
+  xlab("Principal Component") +
+  ylab("Cumulative Variance Explained") +
+  ylim(0, 1) +
+  geom_hline(aes(yintercept = 0.9), size = 1, linetype = "dashed") +
+  scale_y_continuous(
+    breaks = c(0, 0.5, 0.9, 1),
+    labels = c("0", "0.5", "0.9", "1")
+  ) +
+  geom_vline(
+    xintercept = k_optimal_8_top,
+    color = "red",
+    size = 1,
+    linetype = "dashed"
+  ) +
+  scale_x_continuous(
+    breaks = c(0, 20, k_optimal_8_top, 60, 80, 100),
+    labels = c("0", "20", as.character(k_optimal_8_top), "60", "80", "100")
+  )
+```
+
+```{r}
+variance_explained_PCA_sub_digits_8_bottom = summary(PCA_R)$importance[3,]
+k_optimal_8_bottom <- which(variance_explained_PCA_sub_digits_8_top >= 0.9)[1]
+my_barplot(variance_explained_PCA_sub_digits_8_bottom[1:100]) +
+  xlab("Principal component") +
+  ylab("Cumulative variance explained") +
+  ylim(0, 1) +
+  geom_hline(aes(yintercept = 0.9), size = 1, linetype = "dashed") +
+  scale_y_continuous(
+    breaks = c(0, 0.5, 0.9, 1),
+    labels = c("0", "0.5", "0.9", "1")
+  ) +
+  geom_vline(xintercept = k_optimal_8_bottom, 
+             color = "red", size = 1, linetype = "dashed") +
+  scale_x_continuous(
+    breaks = c(0, 20, 40, 60, 80, 100), 
+    labels = c("0", "20", "40", "60", "80", "100")
+  )
+```
+
+
+```{r, eval=FALSE}
+PCA_obj_top <- PCA_L
+scores_top <- PCA_obj_top$x
+n <- nrow(scores_top)
+
+df8_top <- data.frame(
+  PC1 = scores_top[,1],
+  PC2 = scores_top[,2],
+  PC3 = scores_top[,3],
+  id = 1:n
+)
+
+pc1_pos_ids_top <- get_top2(df8_top$PC1)
+pc1_neg_ids_top <- get_bottom2(df8_top$PC1)
+
+pc2_pos_ids_top <- get_top2(df8_top$PC2)
+pc2_neg_ids_top <- get_bottom2(df8_top$PC2)
+
+pc3_pos_ids_top <- get_top2(df8_top$PC3)
+pc3_neg_ids_top <- get_bottom2(df8_top$PC3)
+
+extreme_ids_top <- c(pc1_pos_ids_top, pc1_neg_ids_top,
+                 pc2_pos_ids_top, pc2_neg_ids_top,
+                 pc3_pos_ids_top, pc3_neg_ids_top)
+
+df8_top$color <- "#497AA7"
+df8_top$color[extreme_ids_top] <- "red"
+
+df8_top$label <- as.character(df8_top$id)
+
+mark <- function(id, value) paste0(id, " (", round(value,1), ")")
+
+# PC1
+df8_top$label[pc1_pos_ids_top] <- mark(df8_top$id[pc1_pos_ids_top], 
+                                       df8_top$PC1[pc1_pos_ids_top])
+df8_top$label[pc1_neg_ids_top] <- mark(df8_top$id[pc1_neg_ids_top], 
+                                       df8_top$PC1[pc1_neg_ids_top])
+
+# PC2
+df8_top$label[pc2_pos_ids_top] <- mark(df8_top$id[pc2_pos_ids_top], 
+                                       df8_top$PC2[pc2_pos_ids_top])
+df8_top$label[pc2_neg_ids_top] <- mark(df8_top$id[pc2_neg_ids_top], 
+                                       df8_top$PC2[pc2_neg_ids_top])
+
+# PC3
+df8_top$label[pc3_pos_ids_top] <- mark(df8_top$id[pc3_pos_ids_top], 
+                                       df8_top$PC3[pc3_pos_ids_top])
+df8_top$label[pc3_neg_ids_top] <- mark(df8_top$id[pc3_neg_ids_top], 
+                                       df8_top$PC3[pc3_neg_ids_top])
+
+
+cat("=============================================\n")
+cat("   Extreme Points on PCA Axes (Digit = 8)\n")
+cat("=============================================\n\n")
+
+print_block <- function(pc_name, pos_ids, neg_ids, values){
+  cat(pc_name, "axis:\n")
+  cat("  Most positive:\n")
+  cat("    ID", pos_ids[1], "value =", round(values[pos_ids[1]],3), "\n")
+  cat("    ID", pos_ids[2], "value =", round(values[pos_ids[2]],3), "\n")
+  cat("  Most negative:\n")
+  cat("    ID", neg_ids[1], "value =", round(values[neg_ids[1]],3), "\n")
+  cat("    ID", neg_ids[2], "value =", round(values[neg_ids[2]],3), "\n\n")
+}
+
+print_block("PC1", pc1_pos_ids_top, pc1_neg_ids_top, df8_top$PC1)
+print_block("PC2", pc2_pos_ids_top, pc2_neg_ids_top, df8_top$PC2)
+print_block("PC3", pc3_pos_ids_top, pc3_neg_ids_top, df8_top$PC3)
+
+cat("=============================================\n")
+
+
+plot_ly(
+  df8_top,
+  x = ~PC1,
+  y = ~PC2,
+  z = ~PC3,
+  type = "scatter3d",
+  mode = "text",
+  text = ~label,
+  textfont = list(size = 10),
+  color = ~color,
+  colors = c("#497AA7", "red")
+) %>%
+  layout(
+    scene = list(
+      xaxis = list(title = "PC1"),
+      yaxis = list(title = "PC2"),
+      zaxis = list(title = "PC3")
+    ),
+    showlegend = FALSE
+  )
+```
+
+```{r}
+top_8_digit  <- sub_digits_8[, 1:392]
+
+
+bottom_8_dight <- sub_digits_8[, 393:784]
+
+heatmap(small_getdigit(top_8_digit['33',]))
+heatmap(small_getdigit(top_8_digit['278',]))
+
+```
+
+```{r}
+heatmap(small_getdigit(top_8_digit['254',]))
+heatmap(small_getdigit(top_8_digit['351',]))
+```
+
+######################################################################################################
+
+```{r}
+heatmap(small_getdigit(top_8_digit['177',]))
+heatmap(small_getdigit(top_8_digit['399',]))
+```
+
+
+
+```{r}
+heatmap(small_getdigit(top_8_digit['346',]))
+heatmap(small_getdigit(top_8_digit['88',]))
+```
+######################################################################################################
+
+
+
+```{r}
+heatmap(small_getdigit(top_8_digit['114',]))
+heatmap(small_getdigit(top_8_digit['495',]))
+```
+
+```{r}
+heatmap(small_getdigit(top_8_digit['74',]))
+heatmap(small_getdigit(top_8_digit['350',]))
+```
+
+
+
+
+```{r, eval=FALSE}
+
+PCA_obj_bottom <- PCA_R
+scores_bottom <- PCA_obj_bottom$x
+n <- nrow(scores_bottom)
+
+df8_bottom <- data.frame(
+  PC1 = scores_bottom[,1],
+  PC2 = scores_bottom[,2],
+  PC3 = scores_bottom[,3],
+  id = 1:n
+)
+
+
+pc1_pos_ids_bottom <- get_top2(df8_bottom$PC1)
+pc1_neg_ids_bottom <- get_bottom2(df8_bottom$PC1)
+
+pc2_pos_ids_bottom <- get_top2(df8_bottom$PC2)
+pc2_neg_ids_bottom <- get_bottom2(df8_bottom$PC2)
+
+pc3_pos_ids_bottom <- get_top2(df8_bottom$PC3)
+pc3_neg_ids_bottom <- get_bottom2(df8_bottom$PC3)
+
+extreme_ids_bottom <- c(pc1_pos_ids_bottom, pc1_neg_ids_bottom,
+                 pc2_pos_ids_bottom, pc2_neg_ids_bottom,
+                 pc3_pos_ids_bottom, pc3_neg_ids_bottom)
+
+
+df8_bottom$color <- "#497AA7"
+df8_bottom$color[extreme_ids_bottom] <- "red"
+
+
+df8_bottom$label <- as.character(df8_bottom$id)
+
+mark <- function(id, value) paste0(id, " (", round(value,1), ")")
+
+# PC1
+df8_bottom$label[pc1_pos_ids_bottom] <- mark(df8_bottom$id[pc1_pos_ids_bottom], 
+                                             df8_bottom$PC1[pc1_pos_ids_bottom])
+df8_bottom$label[pc1_neg_ids_bottom] <- mark(df8_bottom$id[pc1_neg_ids_bottom], 
+                                             df8_bottom$PC1[pc1_neg_ids_bottom])
+
+# PC2
+df8_bottom$label[pc2_pos_ids_bottom] <- mark(df8_bottom$id[pc2_pos_ids_bottom], 
+                                             df8_bottom$PC2[pc2_pos_ids_bottom])
+df8_bottom$label[pc2_neg_ids_bottom] <- mark(df8_bottom$id[pc2_neg_ids_bottom], 
+                                             df8_bottom$PC2[pc2_neg_ids_bottom])
+
+# PC3
+df8_bottom$label[pc3_pos_ids_bottom] <- mark(df8_bottom$id[pc3_pos_ids_bottom], 
+                                             df8_bottom$PC3[pc3_pos_ids_bottom])
+df8_bottom$label[pc3_neg_ids_bottom] <- mark(df8_bottom$id[pc3_neg_ids_bottom], 
+                                             df8_bottom$PC3[pc3_neg_ids_bottom])
+
+
+cat("=============================================\n")
+cat("   Extreme Points on PCA Axes (Digit = 8)\n")
+cat("=============================================\n\n")
+
+print_block <- function(pc_name, pos_ids, neg_ids, values){
+  cat(pc_name, "axis:\n")
+  cat("  Most positive:\n")
+  cat("    ID", pos_ids[1], "value =", round(values[pos_ids[1]],3), "\n")
+  cat("    ID", pos_ids[2], "value =", round(values[pos_ids[2]],3), "\n")
+  cat("  Most negative:\n")
+  cat("    ID", neg_ids[1], "value =", round(values[neg_ids[1]],3), "\n")
+  cat("    ID", neg_ids[2], "value =", round(values[neg_ids[2]],3), "\n\n")
+}
+
+print_block("PC1", pc1_pos_ids_bottom, pc1_neg_ids_bottom, df8_bottom$PC1)
+print_block("PC2", pc2_pos_ids_bottom, pc2_neg_ids_bottom, df8_bottom$PC2)
+print_block("PC3", pc3_pos_ids_bottom, pc3_neg_ids_bottom, df8_bottom$PC3)
+
+cat("=============================================\n")
+
+
+plot_ly(
+  df8_bottom,
+  x = ~PC1,
+  y = ~PC2,
+  z = ~PC3,
+  type = "scatter3d",
+  mode = "text",
+  text = ~label,
+  textfont = list(size = 10),
+  color = ~color,
+  colors = c("#497AA7", "red")
+) %>%
+  layout(
+    scene = list(
+      xaxis = list(title = "PC1"),
+      yaxis = list(title = "PC2"),
+      zaxis = list(title = "PC3")
+    ),
+    showlegend = FALSE
+  )
+
+```
+
+```{r}
+
+
+bottom_8_digit <- sub_digits_8[, 393:784]
+
+heatmap(small_getdigit(bottom_8_digit['96',]))
+heatmap(small_getdigit(bottom_8_digit['254',]))
+```
+
+
+
+```{r}
+heatmap(small_getdigit(bottom_8_digit['205',]))
+heatmap(small_getdigit(bottom_8_digit['268',]))
+
+```
+
+
+
+###################################################################
+
+```{r}
+
+heatmap(small_getdigit(bottom_8_digit['474',]))
+heatmap(small_getdigit(bottom_8_digit['10',]))
+```
+
+```{r}
+heatmap(small_getdigit(bottom_8_digit['433',]))
+heatmap(small_getdigit(bottom_8_digit['202',]))
+```
+
+
+######################################################
+
+```{r}
+
+heatmap(small_getdigit(bottom_8_digit['414',]))
+heatmap(small_getdigit(bottom_8_digit['428',]))
+```
+
+
+```{r}
+heatmap(small_getdigit(bottom_8_digit['398',]))
+heatmap(small_getdigit(bottom_8_digit['497',]))
+```
+
+
+
+
+###########################
+# cca
+
+
+
+###################################################################################################
+
+
+```{r}
+
+sub_digits_8_matrix <- as.matrix(sub_digits_8)
+
+
+top_8  <- sub_digits_8_matrix[, 1:392]
+
+
+bottom_8 <- sub_digits_8_matrix[, 393:784]
+X_top    <- scale(top_8,    center = TRUE, scale = FALSE)
+Y_bottom <- scale(bottom_8, center = TRUE, scale = FALSE)
+
+dim(top_8)   # 500 × 392
+dim(bottom_8)  # 500 × 392
+```
+
+```{r}
+K <- k_optimal_8_top
+
+
+# PCA reduce dimension
+PCA_top <- prcomp(top_8,  center = TRUE, scale. = FALSE)
+PCA_bottom <- prcomp(bottom_8, center = TRUE, scale. = FALSE)
+
+top_part_score_a_Xu <- PCA_top$x[, 1:K] # z(r) = XV(r)
+bottom_part_score_b_Yv <- PCA_bottom$x[, 1:K]
+
+# center
+top_part_score_a_Xu <- scale(top_part_score_a_Xu, 
+                             center = TRUE, scale = FALSE)
+bottom_part_score_b_Yv <- scale(bottom_part_score_b_Yv, 
+                                center = TRUE, scale = FALSE)
+
+# covariance matrices
+cov_top_part_ata_matrix  <- cov(top_part_score_a_Xu) # cov score = ata = (xu)t(xu) = utxt xu / n
+cov_bottom_part_btb_matrix  <- cov(bottom_part_score_b_Yv)
+cov_top_bottom_atb_matrix <- cov(top_part_score_a_Xu, bottom_part_score_b_Yv)
+
+# whitening
+eigen_part_top_part <- eigen(cov_top_part_ata_matrix)
+corr_top_part_inverse <- eigen_part_top_part$vectors %*% 
+  diag(1/sqrt(eigen_part_top_part$values)) %*% t(eigen_part_top_part$vectors)
+
+eigen_part_bottom_part <- eigen(cov_bottom_part_btb_matrix)
+corr_borrom_part_inverse <- eigen_part_bottom_part$vectors %*% 
+  diag(1/sqrt(eigen_part_bottom_part$values)) %*% 
+  t(eigen_part_bottom_part$vectors)
+
+corr_with_top_borrom_part_standardized_sxy_tilde <- corr_top_part_inverse %*% 
+  cov_top_bottom_atb_matrix %*% corr_borrom_part_inverse
+
+# SVD
+SVD_corr_with_top_borrom_part_standardized <- 
+  svd(corr_with_top_borrom_part_standardized_sxy_tilde)
+
+original_U_k_eigenvector_ata <- corr_top_part_inverse %*% 
+  SVD_corr_with_top_borrom_part_standardized$u
+original_V_k_eigenvector_btb <- corr_borrom_part_inverse %*% 
+  SVD_corr_with_top_borrom_part_standardized$v
+
+
+A_k <- top_part_score_a_Xu %*% original_U_k_eigenvector_ata 
+B_k <- bottom_part_score_b_Yv %*% original_V_k_eigenvector_btb 
+```
+
+```{r}
+colnames(top_part_score_a_Xu) = paste0('Zx',1:k_optimal_8_top)
+top_part_score_a_Xu_sub <- top_part_score_a_Xu[1:20, ]
+CCA_heatmap(top_part_score_a_Xu_sub, addnames = T)
+``` 
+
+```{r}
+colnames(bottom_part_score_b_Yv) = paste0('Zy',1:k_optimal_8_bottom)
+bottom_part_score_b_Yv_sub <- bottom_part_score_b_Yv[1:20, ]
+CCA_heatmap(bottom_part_score_b_Yv_sub, addnames = T)
+```
+
+
+```{r}
+df_cca <- data.frame(
+  a1 = A_k[,1], b1 = B_k[,1],
+  a2 = A_k[,2], b2 = B_k[,2],
+  a3 = A_k[,3], b3 = B_k[,3],
+  id = 1:nrow(A_k)
+)
+
+# CCA1
+ggplot(df_cca, aes(a1, b1)) +
+  geom_point(color="darkred", size=2) +
+  geom_smooth(method="lm", se=FALSE, color="black") +
+  xlab("Top-half CCA1") + ylab("Bottom-half CCA1") +
+  ggtitle("CCA1: Digit 8 Top-Bottom Coupling")
+
+# CCA2
+ggplot(df_cca, aes(a2, b2)) +
+  geom_point(color="steelblue", size=2) +
+  geom_smooth(method="lm", se=FALSE, color="black") +
+  xlab("Top-half CCA2") + ylab("Bottom-half CCA2") +
+  ggtitle("CCA2: Digit 8 Top-Bottom Coupling")
+
+# CCA3
+ggplot(df_cca, aes(a3, b3)) +
+  geom_point(color="steelblue", size=2) +
+  geom_smooth(method="lm", se=FALSE, color="black") +
+  xlab("Top-half CCA3") + ylab("Bottom-half CCA3") +
+  ggtitle("CCA2: Digit 8 Top-Bottom Coupling")
+```
+
+
+
+
+```{r}
+dfu <- data.frame(
+  loading = c(original_U_k_eigenvector_ata[,1],
+              original_U_k_eigenvector_ata[,2],
+              original_U_k_eigenvector_ata[,3]),
+  
+  PCA_component = factor(1:nrow(original_U_k_eigenvector_ata)),
+  
+  comp = c(rep("CCA1 (top)",   nrow(original_U_k_eigenvector_ata)),
+           rep("CCA2 (top)",   nrow(original_U_k_eigenvector_ata)),
+           rep("CCA3 (top)",   nrow(original_U_k_eigenvector_ata)))
+)
+
+ggplot(dfu, aes(x = loading, y = PCA_component)) +
+  geom_bar(stat = "identity", fill = "#B96CA9") +
+  facet_grid(~ comp, scales = "free_x") +
+  theme_bw() +
+  theme(
+    axis.text.y  = element_blank(),
+    axis.ticks.y = element_blank()
+  ) +
+  xlab("Coefficient (weight on each top-half principal component)") +
+  ylab("PCA component index") 
+
+```
+
+
+
+```{r}
+dfv <- data.frame(
+  loading = c(original_V_k_eigenvector_btb[,1],
+              original_V_k_eigenvector_btb[,2],
+              original_V_k_eigenvector_btb[,3]),
+  
+  PCA_component = factor(1:nrow(original_V_k_eigenvector_btb)),
+  
+  comp = c(rep("CCA1 (bottom)", nrow(original_V_k_eigenvector_btb)),
+           rep("CCA2 (bottom)", nrow(original_V_k_eigenvector_btb)),
+           rep("CCA3 (bottom)", nrow(original_V_k_eigenvector_btb)))
+)
+
+ggplot(dfv, aes(x = loading, y = PCA_component)) +
+  geom_bar(stat = "identity", fill = "#DF96B4") +
+  facet_grid(~ comp, scales = "free_x") +
+  theme_bw() +
+  theme(
+    axis.text.y  = element_blank(),
+    axis.ticks.y = element_blank()
+  ) +
+  xlab("Coefficient(weight on each bottom-half principal component)") +
+  ylab("PCA component index")
+
+```
+
+
+
+
+
+
+
